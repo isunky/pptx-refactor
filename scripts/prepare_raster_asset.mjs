@@ -537,7 +537,7 @@ async function main() {
   await atomicWrite(output, outputBuffer);
   const outputStat = await fs.stat(output);
   const report = {
-    schema: "make-pptx-editable/raster-asset-report/v1.1",
+    schema: "pptx-refactor/raster-asset-report/v1.1",
     status: warnings.length > 0 ? "warning" : "pass",
     generatedAt: new Date().toISOString(),
     input,

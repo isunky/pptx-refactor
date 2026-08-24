@@ -10,7 +10,7 @@ const HELP = `Usage:
   unzip -p <archive> <entry>
   unzip_compat.mjs --run <script.mjs> [script arguments...]
 
-Compatibility shim used by make-pptx-editable on Windows.
+Compatibility shim used by pptx-refactor on Windows.
 
 Options:
   -Z1              List archive entries, one UTF-8 path per line.
@@ -40,7 +40,7 @@ async function loadRuntimeModule(packageName) {
     );
   }
   const requireFromRuntime = createRequire(
-    path.join(path.resolve(modulesDir), "make-pptx-editable-loader.cjs"),
+    path.join(path.resolve(modulesDir), "pptx-refactor-loader.cjs"),
   );
   let resolved;
   try {

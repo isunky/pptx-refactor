@@ -1,4 +1,4 @@
 interface:
-  display_name: "图片型 PPT 转可编辑"
+  display_name: "PPT重构"
   short_description: "将图片混合型PPT重建为可编辑且视觉统一的演示文稿"
-  default_prompt: "使用 $make-pptx-editable 将这份图片混合型 PPT 转换为尽可能可编辑的 PPTX；全文按标题、正文和列表角色统一，默认逐个重生成通用位图图标，保留 Logo、照片、产品界面和证据图片，并完成逐页视觉检查。"
+  default_prompt: "使用 $pptx-refactor 将这份图片混合型 PPT 重构为尽可能可编辑的 PPTX；全文按标题、正文和列表角色统一，默认逐个重生成通用位图图标，保留 Logo、照片、产品界面和证据图片，并完成逐页视觉检查。"

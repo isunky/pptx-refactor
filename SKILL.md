@@ -1,9 +1,9 @@
 ---
-name: make-pptx-editable
+name: pptx-refactor
 description: Convert image-heavy, flattened, screenshot-based, scanned, or mixed-editability PowerPoint (.pptx) decks into visually faithful, editable, visually consistent PPTX files. Use when a user asks to make slide text or content editable, rebuild picture-based slides, OCR slide content, normalize titles/fonts/bullets, replace screenshots with native PowerPoint text, shapes, tables, or charts, regenerate generic raster icons, or improve editability while preserving the source master and layout. Also use for Chinese requests such as 图片型PPT转可编辑、截图PPT重绘、扫描型PPT、扁平化PPT、内容区域文字可编辑、统一标题字体项目符号、图标重绘、原生元素与位图混合. Do not use for ordinary edits to already-editable decks or for net-new presentations.
 ---
 
-# Make PPTX Editable
+# PPTX Refactor（PPT重构）
 
 Rebuild picture-heavy `.pptx` decks into faithful, maintainable presentations while stating exactly what is editable. Treat this skill as an orchestration layer over `$presentations`, not as a separate PowerPoint authoring stack.
 

@@ -93,7 +93,7 @@ async function loadRuntimeModule(packageName, { optional = false } = {}) {
     );
   }
   const requireFromRuntime = createRequire(
-    path.join(path.resolve(modulesDir), "make-pptx-editable-loader.cjs"),
+    path.join(path.resolve(modulesDir), "pptx-refactor-loader.cjs"),
   );
   let resolved;
   try {

@@ -1645,7 +1645,7 @@ async function main() {
   const reportPath = path.join(workspace, "qa-report.json");
   const ledgerPath = path.join(workspace, "qa-ledger.txt");
   const report = {
-    schema: visualSchema ? "make-pptx-editable/qa-report/v1.1" : "make-pptx-editable/qa-report/v1",
+    schema: visualSchema ? "pptx-refactor/qa-report/v1.1" : "pptx-refactor/qa-report/v1",
     status,
     generatedAt: new Date().toISOString(),
     inputs: { source, final: finalPptx, plan: planPath, workspace, sourceManifest: sourceManifestPath },
