@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Skill
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validate source bundle
+        run: node scripts/validate_skill_bundle.mjs
+
+      - name: Check JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' script; do
+            node --check "${script}"
+          done < <(find scripts tests -type f -name '*.mjs' -print0)
+
+      - name: Run tests
+        run: node --test tests/*.test.mjs
+
+      - name: Verify release payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/pptx-refactor
+          cp SKILL.md LICENSE build/pptx-refactor/
+          cp -R agents references scripts build/pptx-refactor/
+          node scripts/validate_skill_bundle.mjs --root build/pptx-refactor --package
+          (
+            cd build
+            zip -q -r pptx-refactor-ci.zip pptx-refactor
+            unzip -t pptx-refactor-ci.zip
+          )

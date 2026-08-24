@@ -26,4 +26,9 @@ venv/
 *.tmp
 *.temp
 *.bak
+.tmp/
 
+# Generated presentation inspection artifacts
+examples/*.pptx.inspect.ndjson
+examples/pptx-refactor-demo-editable/
+examples/pptx-refactor-demo-flattened/

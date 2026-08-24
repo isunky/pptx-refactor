@@ -7,12 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, for example v0.1.0"
+        description: "Release tag, for example v0.2.0"
         required: true
         type: string
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -26,7 +28,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -58,15 +60,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          test -f SKILL.md
-          test -f agents/openai.yaml
-          test -d references
-          test -d scripts
-          grep -q '^name: pptx-refactor$' SKILL.md
+          node scripts/validate_skill_bundle.mjs
 
           while IFS= read -r -d '' script; do
             node --check "${script}"
-          done < <(find scripts -type f -name '*.mjs' -print0)
+          done < <(find scripts tests -type f -name '*.mjs' -print0)
+
+          node --test tests/*.test.mjs
 
       - name: Build release archive
         shell: bash
@@ -76,8 +76,10 @@ jobs:
           set -euo pipefail
 
           mkdir -p build/pptx-refactor dist
-          cp SKILL.md build/pptx-refactor/
+          cp SKILL.md LICENSE build/pptx-refactor/
           cp -R agents references scripts build/pptx-refactor/
+
+          node scripts/validate_skill_bundle.mjs --root build/pptx-refactor --package
 
           (
             cd build
@@ -86,6 +88,11 @@ jobs:
 
           sha256sum "dist/${ARCHIVE}" > "dist/${ARCHIVE}.sha256"
           unzip -t "dist/${ARCHIVE}"
+
+      - name: Attest release archive
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: dist/${{ steps.version.outputs.archive }}
 
       - name: Create or update GitHub Release
         shell: bash
@@ -102,19 +109,29 @@ jobs:
           )
 
           if gh release view "${TAG}" >/dev/null 2>&1; then
-            gh release upload "${TAG}" "${assets[@]}" --clobber
-            exit 0
+            echo "Release ${TAG} already exists. Published releases are immutable; use a new version." >&2
+            exit 1
           fi
+
+          cat > release-notes.txt <<'EOF'
+          ## 安装 / Installation
+
+          下载 ZIP 和 SHA-256 校验文件，将压缩包中的 `pptx-refactor` 文件夹解压到 Codex Skills 目录，然后调用 `$pptx-refactor`。
+
+          Download the ZIP and checksum, extract the contained `pptx-refactor` folder into the Codex Skills directory, then invoke `$pptx-refactor`.
+
+          Verify build provenance with `gh attestation verify <zip-file> --repo isunky/pptx-refactor`.
+          EOF
 
           create_args=(
             release create "${TAG}"
             "${assets[@]}"
             --title "PPTX Refactor ${TAG}"
             --generate-notes
-            --notes "Download the ZIP, extract it into your Codex Skills directory, and invoke it with \`\$pptx-refactor\`."
+            --notes-file release-notes.txt
           )
 
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]] || git rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null; then
             create_args+=(--verify-tag)
           else
             create_args+=(--target "${GITHUB_SHA}")

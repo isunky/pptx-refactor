@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible problem using synthetic files only.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not upload confidential, customer-owned, identity-bearing, or licensed PowerPoint files. Use a synthetic reproduction.
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Codex version, operating system, and PowerPoint version if relevant.
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Reconstruction mode
+      options:
+        - balanced
+        - maximum-editability
+        - fidelity-first
+        - not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Reproduction and actual behavior
+      description: Include the smallest reproducible steps and sanitized logs.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I confirm that all attached files are synthetic and contain no confidential or third-party content.
+          required: true

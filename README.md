@@ -12,6 +12,7 @@
 ![README](https://img.shields.io/badge/README-中文%20%7C%20English-2563EB?style=flat-square)
 ![GitHub last commit](https://img.shields.io/github/last-commit/isunky/pptx-refactor?style=flat-square)
 [![Release Skill](https://github.com/isunky/pptx-refactor/actions/workflows/release.yml/badge.svg)](https://github.com/isunky/pptx-refactor/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-059669?style=flat-square)](LICENSE)
 
 </div>
 
@@ -21,6 +22,14 @@
 >
 > PPTX Refactor 不用模糊的“完全可编辑”概括结果，而是分别报告文字、结构、
 > 数据和位图的可编辑程度，并记录所有保留项。
+
+## 一分钟上手 / One-minute start
+
+1. 从 [GitHub Releases](https://github.com/isunky/pptx-refactor/releases/latest) 下载最新的 `pptx-refactor-v*.zip` 和 `.sha256`。
+2. 校验文件后，将压缩包中的 `pptx-refactor` 文件夹解压到 Codex Skills 目录并重启 Codex。
+3. 调用：`$pptx-refactor 把这份图片型 PPT 重构为可编辑 PPTX，并保留原有视觉风格。`
+
+Download the latest ZIP and checksum from [GitHub Releases](https://github.com/isunky/pptx-refactor/releases/latest), extract `pptx-refactor` into the Codex Skills directory, restart Codex, then invoke `$pptx-refactor`.
 
 ---
 
@@ -71,6 +80,12 @@ flowchart LR
 | `balanced` | 可编辑性与视觉保真平衡 | 默认选择，适合大多数业务演示文稿 |
 | `maximum-editability` | 尽可能恢复为原生对象 | 明确优先考虑深度编辑能力，并能接受轻微视觉差异 |
 | `fidelity-first` | 尽量贴近原稿外观 | 视觉一致性比深度编辑更重要 |
+
+### 合成演示案例
+
+![PPTX Refactor 三页合成演示](examples/demo-preview.webp)
+
+[查看合成案例](examples/README.md)：扁平输入由 3 张整页图片组成；可编辑输出包含 20 个原生文本框和 9 个原生形状。两者可见内容一致，但维护方式完全不同。
 
 ### 可编辑性说明
 
@@ -133,6 +148,7 @@ $pptx-refactor 使用 maximum-editability 模式处理这份 PPTX，优先把表
 - Logo、人物、照片、产品界面、证据截图和官方图示不会由生成式图像替代。
 - 无法可靠确认的数字、单位、专有名词和图表数据不会被猜测，会保留为图片或标记为人工复核。
 - 如果最终仍有位图内容，交付报告会明确说明其位置、原因和可编辑程度。
+- PPTX 可能包含个人信息、备注、修订历史或嵌入文件；请勿将真实客户文件上传到公开 Issue，问题复现应使用合成文件。
 
 ---
 
@@ -187,6 +203,12 @@ The final handoff reports four dimensions separately instead of making a vague �
 | Data editable | Table cells or chart data can be changed |
 | Raster replaceable | An image can be moved, cropped, resized, or replaced, but its pixels are not editable |
 
+### Synthetic demo
+
+![Three-slide PPTX Refactor synthetic demo](examples/demo-preview.webp)
+
+[Explore the synthetic example](examples/README.md): the flattened input contains three full-slide images, while the editable output contains 20 native text boxes and nine native shapes. The visible content is equivalent; the maintenance model is not.
+
 ### Installation
 
 Clone the repository into the Codex Skills directory, then restart Codex.
@@ -237,6 +259,7 @@ $pptx-refactor Process this deck in maximum-editability mode. Prioritize native 
 - Logos, people, photos, product UI, evidence screenshots, and official diagrams are never replaced with generated substitutes.
 - Uncertain numbers, units, proper nouns, and chart data are never guessed; they remain raster-based or are marked for manual review.
 - Any retained raster content is disclosed with its location, reason, and editability level.
+- PPTX files may contain personal data, notes, revision history, or embedded files. Never upload customer decks to public issues; use synthetic reproductions.
 
 ---
 
@@ -256,4 +279,13 @@ The detailed operating contract lives in [`SKILL.md`](SKILL.md). Supporting refe
 
 Keep paths inside the Skill relative and portable. Before publishing changes, validate the Skill metadata, run syntax checks for the bundled scripts, and inspect the resulting Git diff.
 
-Pushing a semantic-version tag such as `v0.1.0`, or running **Release Skill** manually from GitHub Actions, validates the Skill and publishes a ZIP plus its SHA-256 checksum to GitHub Releases.
+Pushing a semantic-version tag such as `v0.2.0`, or running **Release Skill** manually from GitHub Actions, validates the Skill and publishes a ZIP plus its SHA-256 checksum to GitHub Releases.
+
+Run the repository checks locally with:
+
+```bash
+node scripts/validate_skill_bundle.mjs
+node --test tests/*.test.mjs
+```
+
+Contributions are welcome under the [contribution guide](CONTRIBUTING.md). Security-sensitive reports should follow the [security policy](SECURITY.md). Released code is available under the [MIT License](LICENSE).
