@@ -11,6 +11,7 @@
 ![PowerPoint](https://img.shields.io/badge/PowerPoint-PPTX-B7472A?style=flat-square)
 ![README](https://img.shields.io/badge/README-中文%20%7C%20English-2563EB?style=flat-square)
 ![GitHub last commit](https://img.shields.io/github/last-commit/isunky/pptx-refactor?style=flat-square)
+[![Release Skill](https://github.com/isunky/pptx-refactor/actions/workflows/release.yml/badge.svg)](https://github.com/isunky/pptx-refactor/actions/workflows/release.yml)
 
 </div>
 
@@ -99,6 +100,8 @@ git clone https://github.com/isunky/pptx-refactor.git "${CODEX_HOME:-$HOME/.code
 ```
 
 本 Skill 依赖 Codex 的 `presentations` 工作流与内置工作区运行时。无需在系统中全局安装 Node.js 或 Python 包。
+
+也可以从 [GitHub Releases](https://github.com/isunky/pptx-refactor/releases) 下载最新的 `pptx-refactor-v*.zip`，校验随附的 SHA-256 后，将压缩包中的 `pptx-refactor` 文件夹解压到 Codex Skills 目录。
 
 ### 使用
 
@@ -202,6 +205,8 @@ git clone https://github.com/isunky/pptx-refactor.git "${CODEX_HOME:-$HOME/.code
 
 The Skill uses the Codex `presentations` workflow and bundled workspace runtime. No global Node.js or Python package installation is required.
 
+Alternatively, download the latest `pptx-refactor-v*.zip` from [GitHub Releases](https://github.com/isunky/pptx-refactor/releases), verify it against the accompanying SHA-256 file, and extract the contained `pptx-refactor` folder into your Codex Skills directory.
+
 ### Usage
 
 Invoke the Skill directly in Codex:
@@ -250,3 +255,5 @@ The detailed operating contract lives in [`SKILL.md`](SKILL.md). Supporting refe
 ## Maintenance
 
 Keep paths inside the Skill relative and portable. Before publishing changes, validate the Skill metadata, run syntax checks for the bundled scripts, and inspect the resulting Git diff.
+
+Pushing a semantic-version tag such as `v0.1.0`, or running **Release Skill** manually from GitHub Actions, validates the Skill and publishes a ZIP plus its SHA-256 checksum to GitHub Releases.

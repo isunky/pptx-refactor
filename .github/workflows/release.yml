@@ -1,0 +1,127 @@
+name: Release Skill
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Package and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate version
+        id: version
+        shell: bash
+        env:
+          MANUAL_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${MANUAL_TAG}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: ${tag}" >&2
+            echo "Use a semantic version such as v0.1.0 or v0.2.0-rc.1." >&2
+            exit 1
+          fi
+
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "archive=pptx-refactor-${tag}.zip" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate skill
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f SKILL.md
+          test -f agents/openai.yaml
+          test -d references
+          test -d scripts
+          grep -q '^name: pptx-refactor$' SKILL.md
+
+          while IFS= read -r -d '' script; do
+            node --check "${script}"
+          done < <(find scripts -type f -name '*.mjs' -print0)
+
+      - name: Build release archive
+        shell: bash
+        env:
+          ARCHIVE: ${{ steps.version.outputs.archive }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p build/pptx-refactor dist
+          cp SKILL.md build/pptx-refactor/
+          cp -R agents references scripts build/pptx-refactor/
+
+          (
+            cd build
+            zip -q -r "../dist/${ARCHIVE}" pptx-refactor
+          )
+
+          sha256sum "dist/${ARCHIVE}" > "dist/${ARCHIVE}.sha256"
+          unzip -t "dist/${ARCHIVE}"
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          ARCHIVE: ${{ steps.version.outputs.archive }}
+        run: |
+          set -euo pipefail
+
+          assets=(
+            "dist/${ARCHIVE}#PPTX Refactor Skill"
+            "dist/${ARCHIVE}.sha256#SHA-256 checksum"
+          )
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${assets[@]}" --clobber
+            exit 0
+          fi
+
+          create_args=(
+            release create "${TAG}"
+            "${assets[@]}"
+            --title "PPTX Refactor ${TAG}"
+            --generate-notes
+            --notes "Download the ZIP, extract it into your Codex Skills directory, and invoke it with \`\$pptx-refactor\`."
+          )
+
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            create_args+=(--verify-tag)
+          else
+            create_args+=(--target "${GITHUB_SHA}")
+          fi
+
+          if [[ "${TAG}" == *-* ]]; then
+            create_args+=(--prerelease)
+          fi
+
+          gh "${create_args[@]}"
