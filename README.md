@@ -81,12 +81,6 @@ flowchart LR
 | `maximum-editability` | 尽可能恢复为原生对象 | 明确优先考虑深度编辑能力，并能接受轻微视觉差异 |
 | `fidelity-first` | 尽量贴近原稿外观 | 视觉一致性比深度编辑更重要 |
 
-### 合成演示案例
-
-![PPTX Refactor 三页合成演示](examples/demo-preview.webp)
-
-[查看合成案例](examples/README.md)：扁平输入由 3 张整页图片组成；可编辑输出包含 20 个原生文本框和 9 个原生形状。两者可见内容一致，但维护方式完全不同。
-
 ### 可编辑性说明
 
 最终结果会分别报告以下四个维度，而不是笼统宣称“完全可编辑”：
@@ -202,12 +196,6 @@ The final handoff reports four dimensions separately instead of making a vague �
 | Structure editable | Shapes, connectors, layout, and grouping can be changed |
 | Data editable | Table cells or chart data can be changed |
 | Raster replaceable | An image can be moved, cropped, resized, or replaced, but its pixels are not editable |
-
-### Synthetic demo
-
-![Three-slide PPTX Refactor synthetic demo](examples/demo-preview.webp)
-
-[Explore the synthetic example](examples/README.md): the flattened input contains three full-slide images, while the editable output contains 20 native text boxes and nine native shapes. The visible content is equivalent; the maintenance model is not.
 
 ### Installation
 
