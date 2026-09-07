@@ -48,9 +48,10 @@ Download the latest ZIP and checksum from [GitHub Releases](https://github.com/i
 | 高保真重构 | 保留原文、页数、顺序、画布比例、母版、版式、主题和视觉层级 |
 | 混合可编辑 | 原生重建文字与简单结构，复杂或真实性敏感视觉保留为独立图片资产 |
 | 全局一致性 | 按标题、正文、列表、说明文字、卡片等语义角色统一字体、间距和组件样式 |
+| 内容核对 | 按区域和出现次数核对文字，并单独检查数字、符号、百分比、日期和单位 |
 | 安全规划 | 每一次删除或替换都绑定到明确的源对象，不使用“删除本页全部图片”一类宽泛操作 |
 | 资产可追溯 | 记录保留、提取和生成资产的来源、原因、路径与哈希 |
-| 闭环 QA | 执行导入、导出、重新导入、逐页渲染、布局检查、视觉检查和哈希校验 |
+| 闭环 QA | 先校准代表页，再执行导入、导出、重新导入、逐页渲染、布局检查、视觉检查和哈希校验 |
 
 ### 适用范围
 
@@ -161,9 +162,10 @@ It is not a basic OCR wrapper, and it does not place a flattened screenshot back
 | Faithful reconstruction | Preserves wording, slide count, order, canvas size, masters, layouts, theme, and visual hierarchy |
 | Hybrid editability | Rebuilds text and simple structure natively while retaining complex or authenticity-sensitive visuals as separate images |
 | Deck-wide consistency | Normalizes typography, spacing, and repeated components by semantic role |
+| Content accounting | Verifies regional text occurrence counts and separately checks numbers, signs, percentages, dates, and units |
 | Safe planning | Binds every destructive change to exact source objects instead of broad slide-wide deletion rules |
 | Asset provenance | Records the source, reason, output path, and hash for retained, extracted, and generated assets |
-| Closed-loop QA | Performs import/export/re-import, full-slide rendering, layout checks, visual review, and hash verification |
+| Closed-loop QA | Calibrates representative slides before import/export/re-import, full-slide rendering, layout checks, visual review, and hash verification |
 
 ### Best for
 
@@ -267,7 +269,7 @@ The detailed operating contract lives in [`SKILL.md`](SKILL.md). Supporting refe
 
 Keep paths inside the Skill relative and portable. Before publishing changes, validate the Skill metadata, run syntax checks for the bundled scripts, and inspect the resulting Git diff.
 
-Pushing a semantic-version tag such as `v0.2.0`, or running **Release Skill** manually from GitHub Actions, validates the Skill and publishes a ZIP plus its SHA-256 checksum to GitHub Releases.
+Pushing a semantic-version tag such as `v0.3.0`, or running **Release Skill** manually from GitHub Actions, validates the Skill and publishes a ZIP plus its SHA-256 checksum to GitHub Releases.
 
 Run the repository checks locally with:
 

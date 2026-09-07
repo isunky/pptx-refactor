@@ -88,10 +88,11 @@ Classify every slide as `native-editable`, `mixed`, `flattened`, or `low-quality
 
 ### 4. Write a conversion plan
 
-Create a schema `1.1` `conversion-plan.json` using [manifest-schema.md](references/manifest-schema.md). Read [visual-consistency.md](references/visual-consistency.md) and declare `visualPolicy`, `styleProfile`, and `calibration`. Every region must include:
+Create a schema `1.1` `conversion-plan.json` using [manifest-schema.md](references/manifest-schema.md). Read [visual-consistency.md](references/visual-consistency.md), select the representative slides, and begin with `calibration.status: pending`. Declare `visualPolicy`, a draft `styleProfile`, and `calibration`. Every region must include:
 
 - `slideNumber`
 - `bbox`
+- optional `targetBbox` when full-deck role normalization intentionally moves or resizes the output; `bbox` remains the exact source/deletion footprint
 - `sourceObjectIds`
 - `action`
 - `targetType`
@@ -129,20 +130,21 @@ Validate the plan:
 <RUNTIME_NODE_ABSOLUTE_PATH> scripts/validate_conversion_plan.mjs \
   --manifest <analysis-dir>/source-manifest.json \
   --plan <conversion-plan.json> \
+  --stage calibration \
   --out-map <template-frame-map.json>
 ```
 
-Do not edit the deck until this passes. The resulting map must account for every large slide-local raster and every reconstruction region exactly once.
+Do not edit the deck until this passes. The calibration map must account for the complete plan but grant write access only to the representative slides; every other source object stays unchanged.
 It must also contain a `$presentations`-compatible `outputSlides` view with exact inherited IDs and bounded `action: "add"` permission, plus the conversion-specific `slides` view. Validate the same map with the active `$presentations` template-plan validator before building the starter.
 
 If one composite screenshot contains multiple semantic areas, bind and delete it once with one full-footprint parent reconstruction region. Put the separate text, bullet, table, chart, or icon decisions in validated nested `subregions`; do not repeat the same source image across several top-level destructive dispositions.
 Its parent must also contain a complete `visualAssets` inventory. Each visible asset has one disposition: retain/extract as raster, regenerate as a generic icon, explicitly rebuild as a simple non-icon native visual, or manual review. Preserve authenticity-sensitive content as raster; do not make it disappear merely because the parent screenshot is deleted.
 
-### 5. Prepare the template-preserving starter
+### 5. Prepare the stage-scoped template starter
 
 - Use the source copy as the starter deck.
 - Preserve inherited chrome on the master or layout instead of duplicating it on every slide.
-- Build an exact template-frame map from source slide to source slide by default.
+- Use the calibration frame map first. Build an exact template-frame map from source slide to source slide and preserve every non-representative slide without edits.
 - Delete only the exact slide-local object IDs named in the validated plan.
 - Permit new objects only inside the mapped reconstruction zone, except for intentional slide-wide structural updates recorded in the plan.
 - Full-deck role normalization may update existing native text or repeated component geometry only when exact object IDs, roles, and component families are listed in the plan. Do not use a broad slide selector.
@@ -150,9 +152,10 @@ Its parent must also contain a complete `visualAssets` inventory. Each visible a
 
 ### 6. Calibrate and freeze the visual profile
 
-- If the user explicitly asks to try one page first, use `calibration.mode: user-gated`. Build and render only the representative sample, wait for approval, then record `status: approved` and freeze the approved tokens before authoring the full deck.
-- Otherwise use `calibration.mode: automatic`. Select up to three distinct representative slides covering the densest list, a repeated component family, and an icon-rich layout. Render them, resolve hard findings, record the evidence, set `status: complete`, and continue without pausing.
+- If the user explicitly asks to try one page first, use `calibration.mode: user-gated`. Build and render only the representative sample, run `qa_conversion.mjs --stage calibration`, wait for approval, then record `status: approved` and freeze the approved tokens before authoring the full deck.
+- Otherwise use `calibration.mode: automatic`. Select up to three distinct representative slides covering the densest list, a repeated component family, and an icon-rich layout. Render them, run `qa_conversion.mjs --stage calibration`, resolve hard findings, record the evidence, set `status: complete`, and continue without pausing.
 - Once calibration is approved or complete, do not make ad-hoc per-slide style changes. Add an explicit role or family exception with a reason when the content truly requires one.
+- Re-run `validate_conversion_plan.mjs --stage final` after freezing the profile. Validate the resulting `outputSlides` map with `$presentations`, prepare a fresh full-deck starter, and only then propagate the frozen roles and component families.
 
 ### 7. Rebuild content
 
@@ -165,16 +168,13 @@ Read [reconstruction-rules.md](references/reconstruction-rules.md) before author
 - Rebuild tables and charts natively only when values are recoverable with high confidence. Preserve them as raster exceptions when data cannot be established reliably.
 - Re-render after any text, size, spacing, crop, or alignment change.
 - Apply the frozen role profile to both native and reconstructed text. Derive one canonical style per semantic role from master/layout evidence and the dominant valid source cluster; do not preserve accidental source outliers.
+- Check every non-empty paragraph and text run, not only the first run in a textbox. Declare intentional `bold`, `italic`, `underline`, or `color` differences in the role's `allowedEmphasis`; undeclared run-level drift is a defect.
+- Preserve every expected text occurrence. Compare numbers, signs, decimal points, percentages, dates, and units separately so a short token such as `10` cannot be satisfied by `100`.
 - Give every normalized object a semantic name using `mppe|role=<role>|family=<family>|instance=<id>|part=<part>`. Use lowercase ASCII identifiers so QA can compare peers after round-trip.
 
 ### 8. Handle bullets correctly
 
-- Prefer structured native paragraphs with a bullet character, a positive left margin, and a negative hanging indent.
-- If compatibility is insufficient or the source requires a visibly heavy dot, create one native solid-circle shape and one textbox per logical list item.
-- Never type a literal `•` into the body text to imitate a bullet.
-- Start with adaptive metrics relative to body font size: dot diameter `0.38–0.45`, dot-to-text gap `0.55–0.75`, within-item line spacing `1.05–1.15`, and between-item spacing `0.4–0.6`. Confirm all values in rendered output.
-- Wrapped lines must align with the first character of the item text, not with the bullet.
-- Name independent dots and textboxes with the same list instance and item index. Treat helper-reported overflow as a hard failure.
+Follow the list rules and adaptive metrics in [reconstruction-rules.md](references/reconstruction-rules.md). Use structured native paragraphs when they render correctly; otherwise use the bundled hanging-bullet helper. Never type a literal bullet into body text, accept helper-reported overflow, or leave wrapped lines aligned to the dot instead of the item text.
 
 ### 9. Handle raster assets and icons
 
@@ -188,19 +188,7 @@ Use lossless extraction and source cropping for authenticity-sensitive rasters a
   --report <asset-report.json>
 ```
 
-Use `auto`, `chroma`, or `edge` according to the source. Preserve interior whites, use containment rather than cover-cropping, trim transparent margins, and reject visible seams or opaque rectangular tiles.
-
-For every visible generic raster icon by default:
-
-- First crop and clean the source icon. Keep it as `extract-raster` when the result has clean alpha, no visible tile/seam, and adequate effective resolution.
-- If extraction is not clean, invoke `$imagegen` once per distinct icon and request genuine transparent alpha.
-- Generate a single isolated icon, not an atlas or sprite sheet.
-- Request no text, watermark, frame, tile, shadow, circular backing, or decorative container.
-- Do not regenerate a logo, person, product UI, official diagram, screenshot, or evidence image.
-- Copy the final asset from `CODEX_HOME` into the workspace and record the source, prompt, output path, and selection reason.
-- Draw any supporting circle, card, outline, or shadow as a native PowerPoint shape to avoid double backings.
-- Use the same family anchor, palette, stroke-weight class, detail level, optical coverage, and composition constraints for every icon in the deck.
-- Preserve a native editable icon instead of replacing it with a raster. If extraction fails and ImageGen is unavailable, stop and report that the fallback icon contract cannot be completed; use a CLI fallback only after the user explicitly chooses it under `$imagegen` rules.
+Use `auto`, `chroma`, or `edge` according to the source and apply the extraction, authenticity, and icon-family rules in [reconstruction-rules.md](references/reconstruction-rules.md) and [visual-consistency.md](references/visual-consistency.md). Preserve native icons and authenticity-sensitive assets. For a generic raster icon, keep a clean extraction; invoke `$imagegen` only when extraction fails. Record the selected asset, hashes, provenance, and final embedded-media binding.
 
 For composite screenshots, preserve or replace every inventory entry before removing the parent screenshot. The final slide must contain a verifiable raster at each retained/extracted/regenerated asset bbox; record the source crop, output file hash, and final embedded-media binding. Never accept a text-and-shape-only result when the inventory includes visual assets.
 
@@ -213,7 +201,8 @@ Run:
   --source <source.pptx> \
   --final <output_editable.pptx> \
   --plan <conversion-plan.json> \
-  --workspace <qa-dir>
+  --workspace <qa-dir> \
+  --stage final
 ```
 
 Set the plan's `sourceManifest` to the analyzer output, or copy `source-manifest.json` beside the plan or into the QA workspace. Do not accept a QA run that cannot resolve this manifest, because it cannot prove complete large-raster accounting.
@@ -246,6 +235,7 @@ Summarize the four editability levels and any remaining caveats. Confirm that th
 - `scripts/rebuild_helpers.mjs` — provide style-injected native reconstruction helpers.
 - `scripts/prepare_raster_asset.mjs` — clean and normalize one raster asset without damaging interior whites.
 - `scripts/qa_conversion.mjs` — run editability, structure, visual, round-trip, and hash-bound QA.
+- `scripts/quality_checks.mjs` — provide exact text-occurrence, sensitive-token, and all-run style checks used by QA.
 - `scripts/unzip_compat.mjs` and `scripts/unzip.cmd` — support the subset of `unzip` used by presentation inspection scripts on Windows.
 
 Keep semantic transcription, object grouping, aesthetic reconstruction, icon selection, and full-size visual review as judgment tasks. Do not turn the workflow into an unattended one-click raster-to-layout algorithm.

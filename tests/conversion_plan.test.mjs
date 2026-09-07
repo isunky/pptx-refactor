@@ -131,10 +131,10 @@ async function makeFixture(mutator = () => {}) {
   return { root, manifestPath, planPath, outMapPath, reportPath };
 }
 
-async function validateFixture(t, mutator) {
+async function validateFixture(t, mutator, options = {}) {
   const fixture = await makeFixture(mutator);
   t.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
-  return validateConversionPlan(fixture);
+  return validateConversionPlan({ ...fixture, ...options });
 }
 
 test("valid schema 1.1 conversion plan produces a frame map", async (t) => {
@@ -142,6 +142,12 @@ test("valid schema 1.1 conversion plan produces a frame map", async (t) => {
   assert.equal(report.valid, true, report.errors.join("\n"));
   assert.equal(frameMap.schemaVersion, "1.1");
   assert.equal(frameMap.slides.length, 1);
+});
+
+test("conversion-plan validator rejects unknown stages", async (t) => {
+  const fixture = await makeFixture();
+  t.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  await assert.rejects(validateConversionPlan({ ...fixture, stage: "preview" }), /stage must be calibration or final/u);
 });
 
 test("wildcard source-object selectors are rejected", async (t) => {
@@ -195,4 +201,105 @@ test("large rasters require an explicit raster disposition", async (t) => {
   });
   assert.equal(report.valid, false);
   assert.match(report.errors.join("\n"), /large raster|Large raster/iu);
+});
+
+test("pending calibration is accepted only for calibration-stage validation", async (t) => {
+  const mutator = ({ plan }) => {
+    plan.calibration.status = "pending";
+    plan.calibration.evidence = [];
+    delete plan.calibration.frozenProfileSha256;
+  };
+  const calibration = await validateFixture(t, mutator, { stage: "calibration" });
+  assert.equal(calibration.report.valid, true, calibration.report.errors.join("\n"));
+  assert.equal(calibration.report.stage, "calibration");
+  assert.equal(calibration.report.statistics.activeSlideCount, 1);
+  assert.equal(calibration.frameMap.stage, "calibration");
+
+  const final = await validateFixture(t, mutator, { stage: "final" });
+  assert.equal(final.report.valid, false);
+  assert.match(final.report.errors.join("\n"), /status must be complete|frozenProfileSha256/u);
+});
+
+test("calibration-stage frame maps preserve non-representative slides", async (t) => {
+  const { report, frameMap } = await validateFixture(t, ({ manifest, plan }) => {
+    manifest.slideCount = 2;
+    manifest.slides.push({
+      slideNumber: 2,
+      classification: "native-editable",
+      dimensions: { width: 13.333, height: 7.5, unit: "in" },
+      renderDimensionsPx: { width: 1280, height: 720, unit: "px" },
+      objects: [{ id: "tx/2", slideNumber: 2, kind: "text", text: "Second slide", bbox: { x: 1, y: 1, width: 6, height: 1, unit: "in" }, slideLocal: true }],
+    });
+    plan.slides.push({
+      slideNumber: 2,
+      sourceSlide: 2,
+      classification: "native-editable",
+      regions: [{
+        regionId: "s02-title",
+        slideNumber: 2,
+        bbox: { x: 1, y: 1, width: 6, height: 1, unit: "in" },
+        sourceObjectIds: ["tx/2"],
+        action: "rebuild-text",
+        targetType: "text",
+        expectedText: ["Second slide"],
+        confidence: 1,
+        reason: "Normalize the second slide title.",
+        intent: "style-normalization",
+        styleRole: "title",
+        editability: ["text-editable"],
+      }],
+    });
+    plan.calibration.status = "pending";
+    plan.calibration.evidence = [];
+    delete plan.calibration.frozenProfileSha256;
+  }, { stage: "calibration" });
+  assert.equal(report.valid, true, report.errors.join("\n"));
+  assert.equal(frameMap.slides[1].calibrationActive, false);
+  assert.deepEqual(frameMap.slides[1].deleteObjectIds, []);
+  assert.deepEqual(frameMap.slides[1].addZones, []);
+  assert.ok(frameMap.outputSlides[1].editTargets.every((target) => target.action === "keep"));
+});
+
+test("targetBbox moves output without broadening source deletion authority", async (t) => {
+  const { report, frameMap } = await validateFixture(t, ({ plan }) => {
+    Object.assign(plan.slides[0].regions[0], {
+      action: "rebuild-text",
+      intent: "style-normalization",
+      targetBbox: { x: 2, y: 1.25, width: 6, height: 1, unit: "in" },
+    });
+  });
+  assert.equal(report.valid, true, report.errors.join("\n"));
+  assert.ok(Math.abs(frameMap.slides[0].regions[0].sourceBbox.left - 96) < 0.01);
+  assert.ok(Math.abs(frameMap.slides[0].regions[0].bbox.left - 192) < 0.01);
+  assert.ok(Math.abs(frameMap.slides[0].addZones[0].bbox.left - 192) < 0.01);
+  assert.equal(frameMap.outputSlides[0].editTargets[0].action, "delete");
+  assert.ok(Math.abs(frameMap.outputSlides[0].editTargets[1].zone.left - 192) < 0.01);
+});
+
+test("targetBbox requires an explicit normalization or redesign intent", async (t) => {
+  const { report } = await validateFixture(t, ({ plan }) => {
+    plan.slides[0].regions[0].targetBbox = { x: 2, y: 1.25, width: 6, height: 1, unit: "in" };
+  });
+  assert.equal(report.valid, false);
+  assert.match(report.errors.join("\n"), /targetBbox requires/u);
+});
+
+test("native normalization emits rewrite-and-reposition permission", async (t) => {
+  const { report, frameMap } = await validateFixture(t, ({ plan }) => {
+    Object.assign(plan.slides[0].regions[0], {
+      intent: "style-normalization",
+      targetBbox: { x: 2, y: 1.25, width: 6, height: 1, unit: "in" },
+    });
+  });
+  assert.equal(report.valid, true, report.errors.join("\n"));
+  assert.equal(frameMap.outputSlides[0].editTargets[0].action, "rewrite-and-reposition");
+  assert.ok(Math.abs(frameMap.outputSlides[0].editTargets[0].targetBbox.left - 192) < 0.01);
+});
+
+test("role emphasis declarations reject unknown style tokens", async (t) => {
+  const { report } = await validateFixture(t, ({ plan }) => {
+    plan.styleProfile.roles.title.allowedEmphasis = ["glow"];
+  });
+  assert.equal(report.valid, false);
+  assert.match(report.errors.join("\n"), /allowedEmphasis/u);
 });

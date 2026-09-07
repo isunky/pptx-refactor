@@ -157,7 +157,7 @@ const HELP = `Validate an editable-PPTX conversion plan against an analysis mani
 Usage:
   $RUNTIME_NODE validate_conversion_plan.mjs \\
     --manifest <source-manifest.json> \\
-    --plan <conversion-plan.json> \\
+    --plan <conversion-plan.json> [--stage calibration|final] \\
     --out-map <template-frame-map.json> [--report <validation-report.json>]
 
 Required plan region fields:
@@ -182,8 +182,10 @@ Rules:
     optional subregions describe nested semantic output zones without re-deleting it.
   * schemaVersion, mode, source manifest/source PPTX/source SHA-256, target type,
     editability, and the 0.80 destructive-confidence gate are enforced.
-  * Schema 1.1 also enforces role/component profiles, calibration, annotated
-    feedback accounting, visual intent, and regenerate-all-generic icon policy.
+  * Schema 1.1 also enforces role/component profiles, staged calibration,
+    annotated feedback accounting, visual intent, and extract-or-regenerate icon policy.
+  * --stage calibration emits write access only for representative sample slides;
+    --stage final (the default) requires frozen calibration evidence.
   * Wildcards and delete-all/clear-all selectors are rejected.
 `;
 
@@ -199,7 +201,7 @@ function parseArgs(argv) {
       throw new Error(`Unexpected positional argument: ${token}`);
     }
     const key = token.slice(2);
-    if (!["manifest", "plan", "out-map", "report"].includes(key)) {
+    if (!["manifest", "plan", "out-map", "report", "stage"].includes(key)) {
       throw new Error(`Unknown option: ${token}`);
     }
     const value = argv[index + 1];
@@ -873,7 +875,7 @@ function validateSemanticMap(value, label, errors) {
   return ids;
 }
 
-function validateVisualContract(plan, slidesByNumber, objectsById, errors, warnings) {
+function validateVisualContract(plan, slidesByNumber, objectsById, errors, warnings, stage = "final") {
   const isV11 = String(plan.schemaVersion) === "1.1";
   if (!isV11) {
     warnings.push("Legacy schema 1.0 plan does not claim role, component-family, calibration, feedback-closure, or extract-or-regenerate generic-icon guarantees.");
@@ -897,6 +899,12 @@ function validateVisualContract(plan, slidesByNumber, objectsById, errors, warni
   for (const [roleId, role] of Object.entries(profile?.roles ?? {})) {
     if (!Number.isFinite(Number(role.fontSize)) || Number(role.fontSize) <= 0) errors.push(`plan.styleProfile.roles.${roleId}.fontSize must be positive pixels.`);
     if (!Number.isInteger(Number(role.maxLines)) || Number(role.maxLines) < 1) errors.push(`plan.styleProfile.roles.${roleId}.maxLines must be a positive integer.`);
+    if (role.allowedEmphasis != null) {
+      const allowedEmphasis = new Set(["bold", "italic", "underline", "color"]);
+      if (!Array.isArray(role.allowedEmphasis) || role.allowedEmphasis.some((item) => !allowedEmphasis.has(item))) {
+        errors.push(`plan.styleProfile.roles.${roleId}.allowedEmphasis must contain only bold, italic, underline, or color.`);
+      }
+    }
   }
   if (!profile?.iconFamily || typeof profile.iconFamily !== "object" || Array.isArray(profile.iconFamily)) {
     errors.push("plan.styleProfile.iconFamily is required for schema 1.1.");
@@ -916,7 +924,8 @@ function validateVisualContract(plan, slidesByNumber, objectsById, errors, warni
     if (!new Set(["automatic", "user-gated"]).has(calibration.mode)) errors.push("plan.calibration.mode must be automatic or user-gated.");
     if (policy?.calibrationMode && calibration.mode !== policy.calibrationMode) errors.push("plan.calibration.mode must match visualPolicy.calibrationMode.");
     const requiredStatus = calibration.mode === "user-gated" ? "approved" : "complete";
-    if (calibration.status !== requiredStatus) errors.push(`plan.calibration.status must be ${requiredStatus} for ${calibration.mode} mode.`);
+    const allowedStatuses = stage === "calibration" ? new Set(["pending", requiredStatus]) : new Set([requiredStatus]);
+    if (!allowedStatuses.has(calibration.status)) errors.push(`plan.calibration.status must be ${[...allowedStatuses].join(" or ")} for ${calibration.mode} mode during ${stage} validation.`);
     if (!Array.isArray(calibration.representativeSlides) || calibration.representativeSlides.length < 1 || calibration.representativeSlides.length > 3) {
       errors.push("plan.calibration.representativeSlides must contain one to three slide numbers.");
     } else {
@@ -924,11 +933,13 @@ function validateVisualContract(plan, slidesByNumber, objectsById, errors, warni
         if (!slidesByNumber.has(Number(slideNumber))) errors.push(`plan.calibration references unknown slide ${slideNumber}.`);
       }
     }
-    if (!Array.isArray(calibration.evidence) || calibration.evidence.length === 0) errors.push("plan.calibration.evidence must contain rendered calibration evidence.");
-    if (!/^[0-9a-f]{64}$/i.test(String(calibration.frozenProfileSha256 ?? ""))) {
-      errors.push("plan.calibration.frozenProfileSha256 must be a SHA-256 digest.");
-    } else if (profile && calibration.frozenProfileSha256.toLowerCase() !== canonicalJsonSha256(profile)) {
-      errors.push("plan.calibration.frozenProfileSha256 must equal the canonical SHA-256 of plan.styleProfile.");
+    if (stage === "final" || calibration.status !== "pending") {
+      if (!Array.isArray(calibration.evidence) || calibration.evidence.length === 0) errors.push("plan.calibration.evidence must contain rendered calibration evidence after calibration completes.");
+      if (!/^[0-9a-f]{64}$/i.test(String(calibration.frozenProfileSha256 ?? ""))) {
+        errors.push("plan.calibration.frozenProfileSha256 must be a SHA-256 digest after calibration completes.");
+      } else if (profile && calibration.frozenProfileSha256.toLowerCase() !== canonicalJsonSha256(profile)) {
+        errors.push("plan.calibration.frozenProfileSha256 must equal the canonical SHA-256 of plan.styleProfile.");
+      }
     }
   }
 
@@ -978,6 +989,9 @@ function validateVisualContract(plan, slidesByNumber, objectsById, errors, warni
 function validateVisualRegionFields(raw, context, visualContract, errors) {
   if (!visualContract.isV11) return;
   if (!VISUAL_INTENTS.has(raw.intent)) errors.push(`${context}.intent must be faithful-rebuild, style-normalization, or user-approved-redesign.`);
+  if (raw.targetBbox != null && !["style-normalization", "user-approved-redesign"].includes(raw.intent)) {
+    errors.push(`${context}.targetBbox requires style-normalization or user-approved-redesign intent.`);
+  }
   if (raw.styleRole != null && !visualContract.roleIds.has(String(raw.styleRole))) errors.push(`${context}.styleRole must reference plan.styleProfile.roles.`);
   if (raw.componentFamily != null && !visualContract.familyIds.has(String(raw.componentFamily))) errors.push(`${context}.componentFamily must reference plan.styleProfile.componentFamilies.`);
   if (raw.issueRefs != null) {
@@ -990,8 +1004,10 @@ function validateVisualRegionFields(raw, context, visualContract, errors) {
   }
 }
 
-export async function validateConversionPlan({ manifestPath, planPath, outMapPath, reportPath }) {
+export async function validateConversionPlan({ manifestPath, planPath, outMapPath, reportPath, stage = "final" }) {
+  if (!new Set(["calibration", "final"]).has(stage)) throw new Error("stage must be calibration or final.");
   const report = makeReportBase(manifestPath, planPath);
+  report.stage = stage;
   await removeStaleMap(outMapPath);
   const { value: manifest, bytes: manifestBytes } = await readJson(manifestPath, "manifest");
   const { value: plan, bytes: planBytes } = await readJson(planPath, "plan");
@@ -1085,7 +1101,8 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
       }
     }
   }
-  const visualContract = validateVisualContract(plan, slidesByNumber, objectsById, errors, warnings);
+  const visualContract = validateVisualContract(plan, slidesByNumber, objectsById, errors, warnings, stage);
+  const calibrationSlideNumbers = new Set((plan.calibration?.representativeSlides ?? []).map(Number));
 
   const largeRasterIds = new Set();
   for (const [index, raster] of manifestLargeRasters.entries()) {
@@ -1188,6 +1205,25 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
         errors.push(
           `${context}.bbox is outside slide ${slideNumber} bounds ${dimensions.width}x${dimensions.height}.`,
         );
+      }
+    }
+    let targetBbox = bbox;
+    if (raw.targetBbox != null) {
+      try {
+        targetBbox = bboxToPixels(
+          normalizeBbox(raw.targetBbox, `${context}.targetBbox`, { requireUnit: true }),
+          dimensions,
+          `${context}.targetBbox`,
+        );
+        const tolerance = 0.5;
+        if (
+          targetBbox.left < -tolerance
+          || targetBbox.top < -tolerance
+          || targetBbox.left + targetBbox.width > dimensions.width + tolerance
+          || targetBbox.top + targetBbox.height > dimensions.height + tolerance
+        ) errors.push(`${context}.targetBbox is outside slide ${slideNumber} bounds ${dimensions.width}x${dimensions.height}.`);
+      } catch (error) {
+        errors.push(error.message);
       }
     }
 
@@ -1404,7 +1440,8 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
     normalizedRegions.push({
       ...raw,
       slideNumber,
-      bbox,
+      sourceBbox: bbox,
+      bbox: targetBbox,
       sourceObjectIds,
       confidence,
       targetTypeComponents,
@@ -1541,7 +1578,7 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
       let itemBox;
       try {
         itemBox = bboxToPixels(normalizeBbox(item.bbox, `${itemContext}.bbox`, { requireUnit: true }), sourceSlide.dimensions, `${itemContext}.bbox`);
-        const inside = bboxIntersection(region.bbox, itemBox).area;
+        const inside = bboxIntersection(region.sourceBbox, itemBox).area;
         if (inside / Math.max(1, itemBox.width * itemBox.height) < 0.995) errors.push(`${itemContext}.bbox must be fully contained by its parent reconstruction region.`);
       } catch (error) { errors.push(error.message); }
       if (!ASSET_CLASSES.has(item.assetClass)) errors.push(`${itemContext}.assetClass must be one of: ${[...ASSET_CLASSES].join(", ")}.`);
@@ -1634,7 +1671,7 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
         );
         continue;
       }
-      const sourceCoverage = bboxMetrics(region.bbox, sourceBox).sourceCoverage;
+      const sourceCoverage = bboxMetrics(region.sourceBbox, sourceBox).sourceCoverage;
       if (sourceCoverage < MIN_DESTRUCTIVE_OBJECT_COVERAGE) {
         errors.push(
           `${region.__source}.bbox covers only ${(sourceCoverage * 100).toFixed(2)}% of bound source object `
@@ -1646,12 +1683,12 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
     }
     if (!sourceBoxes.length) continue;
     const footprint = bboxUnion(sourceBoxes);
-    const metrics = bboxMetrics(region.bbox, footprint);
+    const metrics = bboxMetrics(region.sourceBbox, footprint);
     const safeFootprint = metrics.sourceCoverage >= MIN_DESTRUCTIVE_OBJECT_COVERAGE
       && (
         metrics.iou >= MIN_DESTRUCTIVE_IOU
         || (
-          bboxContains(region.bbox, footprint)
+          bboxContains(region.sourceBbox, footprint)
           && metrics.expansion >= 1
           && metrics.expansion <= MAX_DESTRUCTIVE_REGION_EXPANSION
         )
@@ -1708,6 +1745,7 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
   }
 
   report.statistics = {
+    stage,
     slideCount: slidesByNumber.size,
     manifestObjectCount: objectsById.size,
     largeRasterCount: largeRasterIds.size,
@@ -1715,6 +1753,7 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
     semanticSubregionCount: normalizedRegions.reduce((sum, region) => sum + region.semanticSubregions.length, 0),
     representedSlideCount: representedSlides.size,
     boundSourceObjectCount: coverageByObjectId.size,
+    activeSlideCount: stage === "calibration" ? calibrationSlideNumbers.size : slidesByNumber.size,
   };
   report.valid = errors.length === 0;
 
@@ -1735,7 +1774,9 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
   const frameMapSlides = [...slidesByNumber.entries()]
     .sort(([a], [b]) => a - b)
     .map(([slideNumber, { slide, dimensions }]) => {
-      const regions = (regionsBySlide.get(slideNumber) ?? []).map((region, index) => {
+      const calibrationActive = stage !== "calibration" || calibrationSlideNumbers.has(slideNumber);
+      const sourceRegions = calibrationActive ? (regionsBySlide.get(slideNumber) ?? []) : [];
+      const regions = sourceRegions.map((region, index) => {
         const frameId = typeof region.regionId === "string" && region.regionId.trim()
           ? region.regionId.trim()
           : `slide-${String(slideNumber).padStart(3, "0")}-frame-${String(index + 1).padStart(3, "0")}`;
@@ -1767,6 +1808,8 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
         return {
           frameId,
           bbox: region.bbox,
+          sourceBbox: region.sourceBbox,
+          ...(region.targetBbox != null ? { targetBbox: region.bbox } : {}),
           sourceObjectIds: [...region.sourceObjectIds],
           sourceObjects: region.sourceObjectIds.map((objectId) => {
             const object = objectsById.get(objectId);
@@ -1834,6 +1877,7 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
         preserveObjectIds: allSlideObjectIds.filter((objectId) => !deleteSet.has(objectId)),
         addZones,
         regions,
+        calibrationActive,
       };
     });
 
@@ -1842,6 +1886,19 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
   // duplicate the source slides without translating IDs or weakening the
   // exact-object deletion contract.
   const outputSlides = frameMapSlides.map((slideEntry) => {
+    if (stage === "calibration" && !slideEntry.calibrationActive) {
+      return {
+        outputSlide: slideEntry.slideNumber,
+        sourceSlide: slideEntry.sourceSlide,
+        narrativeRole: "source preservation outside calibration sample",
+        reuseMode: "duplicate-slide",
+        editTargets: slideEntry.preserveObjectIds.map((sourceElementId) => ({
+          action: objectsById.get(sourceElementId)?.isPlaceholder ? "rewrite" : "keep",
+          sourceElementId,
+          reason: "Preserve this source object while calibrating representative slides.",
+        })),
+      };
+    }
     const editTargets = [];
     const regionObjectIds = new Set();
     for (const region of slideEntry.regions) {
@@ -1874,9 +1931,10 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
       for (const objectId of region.sourceObjectIds) {
         const object = objectsById.get(objectId);
         editTargets.push({
-          action: object?.isPlaceholder ? "rewrite" : "keep",
+          action: region.targetBbox != null ? "rewrite-and-reposition" : object?.isPlaceholder ? "rewrite" : "keep",
           sourceElementId: objectId,
           regionId: region.frameId,
+          ...(region.targetBbox != null ? { targetBbox: region.bbox } : {}),
           reason: region.reason || `Preserve the exact source object for ${region.action}.`,
         });
       }
@@ -1911,6 +1969,7 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
 
   const frameMap = {
     schemaVersion: String(plan.schemaVersion ?? "1.0"),
+    stage,
     generatedAt: manifest.generatedAt ?? null,
     source: {
       manifestPath: path.resolve(manifestPath),
@@ -1923,6 +1982,7 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
       path: path.resolve(planPath),
       sha256: planHash,
       mode: plan.mode,
+      stage,
       sourceManifest: path.resolve(manifestPath),
       sourcePptx: sourceIdentity.declaredSourcePath ?? null,
       outputPptx: sourceIdentity.outputPath ?? null,
@@ -1952,7 +2012,8 @@ export async function validateConversionPlan({ manifestPath, planPath, outMapPat
             .filter((subregion) => subregion.sourceObjectIds.includes(objectId))
             .map((subregion) => frameIdByRegion.get(subregion)),
         ]).filter(Boolean),
-      })),
+      }))
+      .filter((entry) => entry.frameIds.length > 0),
   };
 
   await writeJson(outMapPath, frameMap);
@@ -1986,6 +2047,7 @@ async function main() {
       planPath: args.plan,
       outMapPath: args["out-map"],
       reportPath: args.report,
+      stage: args.stage ?? "final",
     });
     if (!report.valid) {
       console.error(`Conversion plan is invalid (${report.errors.length} error(s), ${report.warnings.length} warning(s)).`);

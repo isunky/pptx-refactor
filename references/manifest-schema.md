@@ -88,7 +88,7 @@ Use this top-level form:
   "sourceSha256": "...",
   "visualPolicy": {
     "normalizationScope": "full-deck-role-based",
-    "iconMode": "regenerate-all-generic",
+    "iconMode": "extract-or-regenerate-generic",
     "qaStrictness": "tiered",
     "calibrationMode": "automatic"
   },
@@ -142,15 +142,17 @@ The validator accepts legacy `1.0` manifests/plans for compatibility. New work p
 Schema `1.1` requires:
 
 - `visualPolicy.normalizationScope`: `full-deck-role-based`.
-- `visualPolicy.iconMode`: `regenerate-all-generic`.
+- `visualPolicy.iconMode`: `extract-or-regenerate-generic`.
 - `visualPolicy.qaStrictness`: `tiered`.
 - `visualPolicy.calibrationMode`: `automatic` or `user-gated`, matching `calibration.mode`.
 - `styleProfile.roles`: canonical style records keyed by lowercase role IDs.
 - `styleProfile.componentFamilies`: repeated component definitions keyed by lowercase family IDs.
 - `styleProfile.iconFamily`: family ID, shared prompt prefix, construction/style attributes, target optical coverage (default `0.72`), centroid tolerance (default `0.04`), and optical tolerance (default `0.08`).
-- `calibration`: mode, representative slide numbers, `complete`/`approved` status, evidence, and `frozenProfileSha256` equal to the SHA-256 of recursively key-sorted, whitespace-free JSON for `styleProfile`. Full-deck QA rejects `pending` or a stale profile hash.
+- `calibration`: mode, representative slide numbers, status, evidence, and `frozenProfileSha256`. A calibration-stage plan may use `pending` without evidence or a frozen hash. A final-stage plan requires `complete` for automatic calibration or `approved` for user-gated calibration, rendered evidence, and a hash equal to the SHA-256 of recursively key-sorted, whitespace-free JSON for `styleProfile`.
 
-Role records declare the tokens that QA can inspect: typeface, font size in pixels, bold/weight, normalized color, alignment, line spacing, insets, and `maxLines`. Component-family records declare expected relative part boxes or anchors, flexible axes, and an optional tighter tolerance. Object names use `mppe|role=<role>|family=<family>|instance=<id>|part=<part>` with lowercase ASCII IDs.
+Role records declare the tokens that QA can inspect: typeface, font size in pixels, bold/weight, normalized color, alignment, line spacing, insets, and `maxLines`. They may declare `allowedEmphasis` using `bold`, `italic`, `underline`, or `color`; QA applies canonical tokens to every non-empty run and permits only these listed differences. Component-family records declare expected relative part boxes or anchors, flexible axes, and an optional tighter tolerance. Object names use `mppe|role=<role>|family=<family>|instance=<id>|part=<part>` with lowercase ASCII IDs.
+
+Validate a draft and emit a representative-slide-only map with `--stage calibration`. After inspecting the sample, update calibration evidence and the frozen profile hash, then rerun with `--stage final`. Omitting `--stage` remains equivalent to `final`.
 
 The analyzer may emit style clusters and role/component/icon candidates. These are evidence, not permission to infer uncertain semantics.
 
@@ -160,6 +162,7 @@ Every region requires:
 
 - `slideNumber`: one-based integer matching its containing slide.
 - `bbox`: finite, non-negative `x`, `y`, `width`, and `height`; declare a supported unit.
+- `targetBbox` (optional): the final output region when role-based normalization intentionally moves or resizes content. `bbox` remains the exact source/deletion footprint; both boxes must stay inside the slide.
 - `sourceObjectIds`: non-empty exact inspect IDs unless the action is a recorded new construction in a bounded zone.
 - `action`: one of the fixed values below.
 - `targetType`: expected output object category.
