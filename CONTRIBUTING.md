@@ -19,4 +19,4 @@ Thanks for helping improve PPTX Refactor. 欢迎改进 PPTX Refactor。
 
 ## Release policy
 
-Releases use semantic tags such as `v0.2.0`. A published tag and its assets are immutable. Create a new patch version instead of replacing an existing Release.
+Releases use semantic tags such as `v0.3.0`. A published tag and its assets are immutable. Create a new patch version instead of replacing an existing Release.

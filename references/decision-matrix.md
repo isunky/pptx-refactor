@@ -43,7 +43,7 @@ These thresholds are not decisions. A transparent image may cover a large box wi
 | Chart with recoverable series/categories | `rebuild-chart` | native chart | Data, scale, or series meaning is uncertain |
 | Photo or authentic visual | `extract-raster` or `retain-raster` | image | Source quality is insufficient or licensing/provenance is unknown |
 | Logo, official UI, evidence screenshot | `retain-raster` | image | Never synthesize a substitute |
-| Generic raster icon, any source quality | `regenerate-icon` | transparent image | Stop if it is actually a brand, identity, UI, evidence, or official asset |
+| Generic raster icon | `extract-raster`, then `regenerate-icon` only if extraction fails quality checks | transparent image | Stop if it is actually a brand, identity, UI, evidence, or official asset |
 | Verified native editable icon | `keep-native` | native shape/group | Normalize its placement without converting it to raster |
 | SmartArt/OLE/media/unsupported vector | `manual-review` or `retain-raster` | preserved object/image | Any conversion could remove behavior or data |
 

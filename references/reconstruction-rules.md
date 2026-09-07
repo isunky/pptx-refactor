@@ -95,9 +95,9 @@ If reliable data cannot be recovered, retain the source visual as `raster-replac
 - Reject opaque rectangular tiles, clipped strokes, visible atlas seams, color fringes, excessive blur, or stretched aspect ratios.
 - Place a clean icon on a native support circle when the design requires one. The icon asset itself must not contain a second support circle.
 
-## Regenerate generic raster icons by default
+## Extract generic raster icons before regeneration
 
-Use `$imagegen` once per distinct semantic generic raster icon. Request a single isolated bitmap icon with genuine transparent alpha and no text, watermark, frame, tile, shadow, circle, or container. Create one shared icon-family specification and use the first accepted output as the visual anchor for subsequent prompts. Preserve a verified native editable icon rather than reducing it to raster.
+First crop and clean each distinct generic raster icon from the highest-quality source. Keep the extracted asset when it has clean transparency, no visible tile or seam, intact strokes, adequate effective resolution, and a correct aspect ratio. Use `$imagegen` only when extraction fails one of those checks. Request a single isolated bitmap icon with genuine transparent alpha and no text, watermark, frame, tile, shadow, circle, or container. Create one shared icon-family specification and use the first accepted generated output as the visual anchor for subsequent generated assets. Preserve a verified native editable icon.
 
 Never synthesize:
 

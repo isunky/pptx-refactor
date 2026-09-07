@@ -6,6 +6,12 @@ import path from "node:path";
 import posixPath from "node:path/posix";
 import { createRequire } from "node:module";
 import { parseArgs as parseNodeArgs } from "node:util";
+import {
+  accountExpectedText,
+  missingSensitiveTokens,
+  normalizeComparableText,
+  textStyleSegments,
+} from "./quality_checks.mjs";
 
 const LARGE_RASTER_RATIO = 0.2;
 const BOUNDS_TOLERANCE_PX = 2.5;
@@ -35,7 +41,7 @@ const DEFAULT_ICON_CENTROID_TOLERANCE = 0.04;
 function usage() {
   return [
     "Usage:",
-    "  $RUNTIME_NODE qa_conversion.mjs --source <source.pptx> --final <editable.pptx> --plan <conversion-plan.json> --workspace <dir>",
+    "  $RUNTIME_NODE qa_conversion.mjs --source <source.pptx> --final <editable.pptx> --plan <conversion-plan.json> --workspace <dir> [--stage calibration|final]",
     "",
     "Writes:",
     "  <workspace>/qa-report.json",
@@ -57,6 +63,7 @@ function parseCli(argv) {
       final: { type: "string" },
       plan: { type: "string" },
       workspace: { type: "string" },
+      stage: { type: "string", default: "final" },
     },
     allowPositionals: false,
     strict: true,
@@ -246,11 +253,7 @@ function bboxToPixels(raw, frame) {
 }
 
 function normalizeText(value) {
-  return String(value ?? "")
-    .normalize("NFKC")
-    .replace(/[•●▪‣]/g, "")
-    .replace(/\s+/gu, "")
-    .trim();
+  return normalizeComparableText(value);
 }
 
 function expectedTextItems(value, fallbackConfidence) {
@@ -304,6 +307,7 @@ function flattenPlanRegions(plan) {
         action: String(item.action ?? "").trim(),
         targetType: String(item.targetType ?? item.outputType ?? "").trim(),
         confidence,
+        bbox: item.targetBbox ?? item.bbox,
         expectedTextItems: expectedTextItems(item.expectedText ?? item.text ?? [], confidence),
         parentRegionId: nesting.parentRegionId,
         rootRegionId: nesting.rootRegionId ?? regionId,
@@ -668,6 +672,11 @@ function nearlyEqual(actual, expected, tolerance) {
   return Number.isFinite(actual) && Number.isFinite(expected) && Math.abs(actual - expected) <= tolerance;
 }
 
+function insetsMatch(actual, expected, tolerance = 0.5) {
+  if (!actual || !expected) return false;
+  return ["top", "right", "bottom", "left"].every((key) => nearlyEqual(Number(actual[key]), Number(expected[key]), tolerance));
+}
+
 function semanticElementRecords(slideArtifacts) {
   return slideArtifacts.flatMap((artifact) => elementsFromLayout(artifact.layout).map((element) => ({
     slideNumber: artifact.slideNumber,
@@ -830,6 +839,8 @@ async function main() {
   const finalPptx = path.resolve(requireString(args, "final"));
   const planPath = path.resolve(requireString(args, "plan"));
   const workspace = path.resolve(requireString(args, "workspace"));
+  const stage = String(args.stage ?? "final");
+  if (!new Set(["calibration", "final"]).has(stage)) throw new Error("--stage must be calibration or final.");
   if (source === finalPptx) throw new Error("--final must differ from --source; QA never accepts an in-place overwrite.");
   for (const [label, filePath, extension] of [["source", source, ".pptx"], ["final", finalPptx, ".pptx"], ["plan", planPath, ".json"]]) {
     if (path.extname(filePath).toLowerCase() !== extension) throw new Error(`--${label} must use a ${extension} extension.`);
@@ -848,7 +859,11 @@ async function main() {
   await fs.mkdir(artifactRoot, { recursive: true });
 
   const plan = JSON.parse(await fs.readFile(planPath, "utf8"));
-  const regions = flattenPlanRegions(plan);
+  const allRegions = flattenPlanRegions(plan);
+  const calibrationSlideNumbers = new Set((plan.calibration?.representativeSlides ?? []).map(Number));
+  const regions = stage === "calibration"
+    ? allRegions.filter((region) => calibrationSlideNumbers.has(region.slideNumber))
+    : allRegions;
   const manifestCandidates = [
     typeof plan.sourceManifest === "string" && plan.sourceManifest.trim()
       ? (path.isAbsolute(plan.sourceManifest) ? path.resolve(plan.sourceManifest) : path.resolve(path.dirname(planPath), plan.sourceManifest))
@@ -1090,8 +1105,14 @@ async function main() {
   const roleProfiles = styleProfile.roles && typeof styleProfile.roles === "object" ? styleProfile.roles : {};
   const componentProfiles = styleProfile.componentFamilies && typeof styleProfile.componentFamilies === "object" ? styleProfile.componentFamilies : {};
   const iconProfile = styleProfile.iconFamily && typeof styleProfile.iconFamily === "object" ? styleProfile.iconFamily : {};
-  const semanticElements = semanticElementRecords(finalEvidence.slideArtifacts);
-  const feedbackIssues = Array.isArray(plan.feedbackIssues) ? plan.feedbackIssues : [];
+  const allSemanticElements = semanticElementRecords(finalEvidence.slideArtifacts);
+  const semanticElements = stage === "calibration"
+    ? allSemanticElements.filter((item) => calibrationSlideNumbers.has(item.slideNumber))
+    : allSemanticElements;
+  const allFeedbackIssues = Array.isArray(plan.feedbackIssues) ? plan.feedbackIssues : [];
+  const feedbackIssues = stage === "calibration"
+    ? allFeedbackIssues.filter((issue) => calibrationSlideNumbers.has(Number(issue.slideNumber)))
+    : allFeedbackIssues;
   const visualConsistency = {
     schemaVersion: String(plan.schemaVersion ?? "1.0"),
     semanticObjects: semanticElements.filter((item) => item.semantic).length,
@@ -1113,14 +1134,18 @@ async function main() {
     addCheck(["automatic", "user-gated"].includes(visualPolicy.calibrationMode), "error", "visual-policy-calibration-mode", "Calibration mode must be automatic or user-gated.", { actual: visualPolicy.calibrationMode });
     const calibration = plan.calibration ?? {};
     addCheck(calibration.mode === visualPolicy.calibrationMode, "error", "calibration-mode", "Calibration mode must match visualPolicy.calibrationMode.", { policy: visualPolicy.calibrationMode, calibration: calibration.mode });
-    addCheck(["complete", "approved"].includes(calibration.status), "error", "calibration-status", "Full-deck QA requires completed automatic calibration or user-approved calibration.", { status: calibration.status });
+    const completedCalibrationStatus = calibration.mode === "user-gated" ? "approved" : "complete";
+    const allowedCalibrationStatuses = stage === "calibration" ? ["pending", completedCalibrationStatus] : [completedCalibrationStatus];
+    addCheck(allowedCalibrationStatuses.includes(calibration.status), "error", "calibration-status", stage === "calibration" ? "Calibration QA requires pending or completed calibration state." : "Full-deck QA requires completed automatic calibration or user-approved calibration.", { status: calibration.status, stage });
     addCheck(Array.isArray(calibration.representativeSlides) && calibration.representativeSlides.length > 0, "error", "calibration-slides", "Calibration requires at least one representative slide.", { representativeSlides: calibration.representativeSlides });
-    addCheck(Array.isArray(calibration.evidence) && calibration.evidence.length > 0, "error", "calibration-evidence", "Calibration requires render/inspection evidence.", { evidence: calibration.evidence });
-    addCheck(/^[0-9a-f]{64}$/i.test(String(calibration.frozenProfileSha256 ?? "")) && String(calibration.frozenProfileSha256).toLowerCase() === canonicalJsonSha256(styleProfile), "error", "calibration-profile-hash", "Calibration must bind the exact canonical style profile with SHA-256.", { frozenProfileSha256: calibration.frozenProfileSha256, expected: canonicalJsonSha256(styleProfile) });
+    if (stage === "final" || calibration.status !== "pending") {
+      addCheck(Array.isArray(calibration.evidence) && calibration.evidence.length > 0, "error", "calibration-evidence", "Completed calibration requires render/inspection evidence.", { evidence: calibration.evidence });
+      addCheck(/^[0-9a-f]{64}$/i.test(String(calibration.frozenProfileSha256 ?? "")) && String(calibration.frozenProfileSha256).toLowerCase() === canonicalJsonSha256(styleProfile), "error", "calibration-profile-hash", "Calibration must bind the exact canonical style profile with SHA-256.", { frozenProfileSha256: calibration.frozenProfileSha256, expected: canonicalJsonSha256(styleProfile) });
+    }
 
     for (const issue of feedbackIssues) {
       const issueContext = { issueId: issue.issueId, slideNumber: issue.slideNumber, scope: issue.scope, status: issue.status };
-      addCheck(issue.status !== "open", "error", "feedback-issue-open", "Every annotated feedback issue must be fixed or explicitly waived before delivery.", issueContext);
+      if (stage === "final") addCheck(issue.status !== "open", "error", "feedback-issue-open", "Every annotated feedback issue must be fixed or explicitly waived before delivery.", issueContext);
       if (issue.status === "waived") addCheck(typeof issue.waiverReason === "string" && issue.waiverReason.trim() !== "", "error", "feedback-waiver-reason", "A waived feedback issue requires a nonblank reason.", issueContext);
       if (["component-family", "deck"].includes(issue.scope)) {
         addCheck(Array.isArray(issue.inspectedInstanceIds) && issue.inspectedInstanceIds.length > 0, "error", "feedback-propagation-evidence", "Family/deck feedback must enumerate every peer instance inspected after propagation.", issueContext);
@@ -1141,14 +1166,22 @@ async function main() {
         addCheck(Boolean(profile), "error", "semantic-role-profile", "Every used text role must exist in styleProfile.roles.", { slideNumber: item.slideNumber, objectId: item.element?.aid ?? item.element?.id, role });
         if (profile) {
           const actual = primaryTextStyle(item.element);
+          const segments = textStyleSegments(item.element);
+          const allowedEmphasis = new Set(Array.isArray(profile.allowedEmphasis) ? profile.allowedEmphasis : []);
           const expectedFontSize = profileNumber(profile, "fontSizePx", "fontSize");
-          if (Number.isFinite(expectedFontSize)) addCheck(nearlyEqual(actual.fontSize, expectedFontSize, Number(profile.fontSizeTolerancePx ?? DEFAULT_ROLE_FONT_TOLERANCE_PX)), "error", "role-font-size", "Text font size differs from its frozen role token.", { slideNumber: item.slideNumber, objectId: item.element?.aid ?? item.element?.id, role, expected: expectedFontSize, actual: actual.fontSize });
-          if (profile.typeface) addCheck(String(actual.typeface ?? "").toLowerCase() === String(profile.typeface).toLowerCase(), "error", "role-typeface", "Text typeface differs from its frozen role token.", { slideNumber: item.slideNumber, objectId: item.element?.aid ?? item.element?.id, role, expected: profile.typeface, actual: actual.typeface });
-          if (profile.color) addCheck(actual.color === String(profile.color).toLowerCase(), "error", "role-color", "Text color differs from its frozen role token.", { slideNumber: item.slideNumber, objectId: item.element?.aid ?? item.element?.id, role, expected: profile.color, actual: actual.color });
-          if (profile.bold !== undefined) addCheck(Boolean(actual.bold) === Boolean(profile.bold), "error", "role-bold", "Text weight differs from its frozen role token.", { slideNumber: item.slideNumber, objectId: item.element?.aid ?? item.element?.id, role, expected: profile.bold, actual: actual.bold });
-          if (profile.alignment) addCheck(String(actual.alignment ?? "").toLowerCase() === String(profile.alignment).toLowerCase(), "error", "role-alignment", "Text alignment differs from its frozen role token.", { slideNumber: item.slideNumber, objectId: item.element?.aid ?? item.element?.id, role, expected: profile.alignment, actual: actual.alignment });
-          const expectedLineSpacing = profileNumber(profile, "lineSpacing");
-          if (Number.isFinite(expectedLineSpacing) && Number.isFinite(actual.lineSpacing)) addCheck(nearlyEqual(actual.lineSpacing, expectedLineSpacing, Number(profile.lineSpacingTolerance ?? DEFAULT_ROLE_LINE_SPACING_TOLERANCE)), "error", "role-line-spacing", "Text line spacing differs from its frozen role token.", { slideNumber: item.slideNumber, objectId: item.element?.aid ?? item.element?.id, role, expected: expectedLineSpacing, actual: actual.lineSpacing });
+          for (const segment of segments.length > 0 ? segments : [actual]) {
+            const segmentContext = { slideNumber: item.slideNumber, objectId: item.element?.aid ?? item.element?.id, role, paragraphIndex: segment.paragraphIndex, runIndex: segment.runIndex, textPreview: String(segment.text ?? "").slice(0, 50) };
+            if (Number.isFinite(expectedFontSize)) addCheck(nearlyEqual(segment.fontSize, expectedFontSize, Number(profile.fontSizeTolerancePx ?? DEFAULT_ROLE_FONT_TOLERANCE_PX)), "error", "role-font-size", "A text segment differs from the frozen role font size.", { ...segmentContext, expected: expectedFontSize, actual: segment.fontSize });
+            if (profile.typeface) addCheck(String(segment.typeface ?? "").toLowerCase() === String(profile.typeface).toLowerCase(), "error", "role-typeface", "A text segment differs from the frozen role typeface.", { ...segmentContext, expected: profile.typeface, actual: segment.typeface });
+            if (profile.color && !allowedEmphasis.has("color")) addCheck(segment.color === String(profile.color).toLowerCase(), "error", "role-color", "A text segment differs from the frozen role color without an allowed emphasis declaration.", { ...segmentContext, expected: profile.color, actual: segment.color });
+            if (profile.bold !== undefined && !allowedEmphasis.has("bold")) addCheck(Boolean(segment.bold) === Boolean(profile.bold), "error", "role-bold", "A text segment differs from the frozen role weight without an allowed emphasis declaration.", { ...segmentContext, expected: profile.bold, actual: segment.bold });
+            if (profile.italic !== undefined && !allowedEmphasis.has("italic")) addCheck(Boolean(segment.italic) === Boolean(profile.italic), "error", "role-italic", "A text segment differs from the frozen role italic token without an allowed emphasis declaration.", { ...segmentContext, expected: profile.italic, actual: segment.italic });
+            if (profile.underline !== undefined && !allowedEmphasis.has("underline")) addCheck(Boolean(segment.underline) === Boolean(profile.underline), "error", "role-underline", "A text segment differs from the frozen role underline token without an allowed emphasis declaration.", { ...segmentContext, expected: profile.underline, actual: segment.underline });
+            if (profile.alignment) addCheck(String(segment.alignment ?? "").toLowerCase() === String(profile.alignment).toLowerCase(), "error", "role-alignment", "A paragraph differs from the frozen role alignment.", { ...segmentContext, expected: profile.alignment, actual: segment.alignment });
+            const expectedLineSpacing = profileNumber(profile, "lineSpacing");
+            if (Number.isFinite(expectedLineSpacing) && Number.isFinite(segment.lineSpacing)) addCheck(nearlyEqual(segment.lineSpacing, expectedLineSpacing, Number(profile.lineSpacingTolerance ?? DEFAULT_ROLE_LINE_SPACING_TOLERANCE)), "error", "role-line-spacing", "A paragraph differs from the frozen role line spacing.", { ...segmentContext, expected: expectedLineSpacing, actual: segment.lineSpacing });
+          }
+          if (profile.insets) addCheck(insetsMatch(actual.insets, profile.insets, Number(profile.insetsTolerancePx ?? 0.5)), "error", "role-insets", "Textbox insets differ from the frozen role token.", { slideNumber: item.slideNumber, objectId: item.element?.aid ?? item.element?.id, role, expected: profile.insets, actual: actual.insets });
           const maxLines = profileNumber(profile, "maxLines");
           if (Number.isFinite(maxLines)) addCheck(linesOf(item.element).length <= maxLines, "error", "role-max-lines", "Text exceeds the maximum line count for its semantic role.", { slideNumber: item.slideNumber, objectId: item.element?.aid ?? item.element?.id, role, maxLines, lines: linesOf(item.element) });
         }
@@ -1282,7 +1315,8 @@ async function main() {
         if (sourceObject && finalObject && frame) {
           let sourceBox;
           try { sourceBox = bboxToPixels(sourceObject.bbox ?? sourceObject.bounds ?? sourceObject.box, frame); } catch { sourceBox = undefined; }
-          addCheck(Boolean(sourceBox && boxesSubstantiallyMatch(sourceBox, bboxOf(finalObject), 0.9, 1.15)), "error", "keep-native-geometry", "A keep-native object must retain substantially the same geometry.", { slideNumber: region.slideNumber, regionId: region.regionId, sourceObjectId, sourceBBox: sourceBox, finalBBox: bboxOf(finalObject) });
+          const expectedBox = region.targetBbox != null ? regionBox : sourceBox;
+          addCheck(Boolean(expectedBox && boxesSubstantiallyMatch(expectedBox, bboxOf(finalObject), 0.9, 1.15)), "error", "keep-native-geometry", region.targetBbox != null ? "A repositioned native object must match its planned targetBbox." : "A keep-native object must retain substantially the same geometry.", { slideNumber: region.slideNumber, regionId: region.regionId, sourceObjectId, sourceBBox: sourceBox, targetBBox: expectedBox, finalBBox: bboxOf(finalObject) });
           const hashes = sourceObjectHashes(sourceObjectId);
           if (hashes.length > 0 && kindMatches(finalObject, "image")) {
             const finalMedia = finalRasterMetadata.find((media) => media.slideNumber === region.slideNumber && (media.objectId === sourceObjectId || boxesSubstantiallyMatch(sourceBox, media.bbox, 0.9, 1.15)));
@@ -1300,16 +1334,18 @@ async function main() {
       const orderedText = [...regionTextRecords]
         .sort((a, b) => (bboxOf(a)?.top ?? 0) - (bboxOf(b)?.top ?? 0) || (bboxOf(a)?.left ?? 0) - (bboxOf(b)?.left ?? 0))
         .map(recordText)
-        .join("\n");
+        .join("\u0000");
       for (const expected of region.expectedTextItems) {
-        const expectedNormalized = normalizeText(expected.text);
-        const matchingRecords = regionTextRecords.filter((record) => normalizeText(recordText(record)).includes(expectedNormalized));
-        const found = expectedNormalized !== "" && (matchingRecords.length > 0 || normalizeText(orderedText).includes(expectedNormalized));
-        addCheck(found, "error", "expected-text-accounted", `Expected text is missing from native final text inside the planned region: "${expected.text}".`, { slideNumber: region.slideNumber, regionId: region.regionId, regionBBox: regionBox });
         if (["rebuild-text", "rebuild-shape", "rebuild-table", "rebuild-chart"].includes(region.action)) {
           addCheck(!(expected.needsReview || Number(expected.confidence) < 0.8), "error", "uncertain-text", "Low-confidence or review-marked text must not be silently finalized as rebuilt text.", { slideNumber: region.slideNumber, regionId: region.regionId, text: expected.text, confidence: expected.confidence });
         }
-        addCheck(matchingRecords.length <= 1, "warning", "duplicate-expected-text", `Expected text appears in multiple native objects: "${expected.text}".`, { slideNumber: region.slideNumber, regionId: region.regionId, matches: matchingRecords.map(recordId) });
+      }
+      for (const accounting of accountExpectedText(region.expectedTextItems, orderedText)) {
+        addCheck(accounting.accounted, "error", "expected-text-accounted", `Expected text occurrence count is incomplete inside the planned region: "${accounting.text}".`, { slideNumber: region.slideNumber, regionId: region.regionId, regionBBox: regionBox, required: accounting.required, found: accounting.found });
+      }
+      const expectedCombined = region.expectedTextItems.map((item) => item.text).join("\n");
+      for (const missing of missingSensitiveTokens(expectedCombined, orderedText)) {
+        addCheck(false, "error", "sensitive-token-missing", `A number, unit, date, or percentage is missing or changed inside the planned region: "${missing.token}".`, { slideNumber: region.slideNumber, regionId: region.regionId, token: missing.token, required: missing.required, found: missing.found });
       }
     }
     if (region.action === "retain-raster" && regionBox) {
@@ -1598,6 +1634,9 @@ async function main() {
 
   for (const diff of sourceVsFinalDiffs) {
     addCheck(diff.dimensionsMatch, "error", "render-dimensions-source-final", "Source and final rendered slide dimensions must match.", { slideNumber: diff.slideNumber });
+    if (stage === "calibration" && !calibrationSlideNumbers.has(diff.slideNumber)) {
+      addCheck(diff.meanAbsoluteDifference <= 0.5 && diff.changedPixelRatio <= 0.005, "error", "calibration-outside-scope", "Slides outside the calibration sample must remain visually unchanged.", { slideNumber: diff.slideNumber, meanAbsoluteDifference: diff.meanAbsoluteDifference, changedPixelRatio: diff.changedPixelRatio });
+    }
     addCheck(diff.outsideMaskMeanAbsoluteDifference <= 50 && diff.outsideMaskChangedPixelRatio <= 0.65, "warning", "visual-fidelity", "Source-to-final visual difference outside authorized redesign masks is high; inspect the full-size diff and both slides.", { slideNumber: diff.slideNumber, meanAbsoluteDifference: diff.meanAbsoluteDifference, changedPixelRatio: diff.changedPixelRatio, outsideMaskMeanAbsoluteDifference: diff.outsideMaskMeanAbsoluteDifference, outsideMaskChangedPixelRatio: diff.outsideMaskChangedPixelRatio, maskedPixelRatio: diff.maskedPixelRatio, masks: diff.masks });
   }
   for (const diff of finalVsRoundtripDiffs) {
@@ -1648,7 +1687,7 @@ async function main() {
     schema: visualSchema ? "pptx-refactor/qa-report/v1.1" : "pptx-refactor/qa-report/v1",
     status,
     generatedAt: new Date().toISOString(),
-    inputs: { source, final: finalPptx, plan: planPath, workspace, sourceManifest: sourceManifestPath },
+    inputs: { source, final: finalPptx, plan: planPath, workspace, sourceManifest: sourceManifestPath, stage },
     hashes: {
       sourceBefore: sourceHashBefore,
       sourceAfter: sourceHashAfter,
@@ -1657,6 +1696,8 @@ async function main() {
       roundtrip: roundtripHash,
     },
     summary: {
+      stage,
+      checkedSlides: stage === "calibration" ? [...calibrationSlideNumbers].sort((a, b) => a - b) : finalEvidence.slides.map((_, index) => index + 1),
       sourceSlides: sourceEvidence.slides.length,
       finalSlides: finalEvidence.slides.length,
       roundtripSlides: roundtripEvidence.slides.length,
