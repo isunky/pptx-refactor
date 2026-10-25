@@ -24,6 +24,10 @@ Artifact Tool numeric `fontSize` values are pixels while many source PPTX values
 pixels = points × 96 / 72
 ```
 
+## Incorporate authorized source corrections
+
+When the user also requests content review, record their source priority before editing. A designated authoritative deck controls conflicting numbers; a suggestion draft does not establish completed work. Distinguish achieved results, trial operation, planned actions, draft proposals and recommendations. Keep qualifiers such as suspected records and the original business meaning and units. Do not invent a rounding explanation for totals that disagree. Use internal material for its supported content without exposing internal meeting titles or dates on the slide when the user excludes them; keep provenance in private review records or notes only when appropriate. These rules guide an authorized review, not permission to rewrite a color-only request.
+
 ## Rebuild text semantically
 
 - Use one textbox per logical heading, paragraph, caption, label, or list item.

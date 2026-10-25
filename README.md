@@ -47,6 +47,7 @@ Download the latest ZIP and checksum from [GitHub Releases](https://github.com/i
 |---|---|
 | 高保真重构 | 保留原文、页数、顺序、画布比例、母版、版式、主题和视觉层级 |
 | 混合可编辑 | 原生重建文字与简单结构，复杂或真实性敏感视觉保留为独立图片资产 |
+| 配色细化 | 基于用户最新版本按文字、模块和图标分别调整配色，保留徽标与证据截图原色 |
 | 全局一致性 | 按标题、正文、列表、说明文字、卡片等语义角色统一字体、间距和组件样式 |
 | 内容核对 | 按区域和出现次数核对文字，并单独检查数字、符号、百分比、日期和单位 |
 | 安全规划 | 每一次删除或替换都绑定到明确的源对象，不使用“删除本页全部图片”一类宽泛操作 |
@@ -126,6 +127,16 @@ $pptx-refactor 把这份图片型 PPT 重构为可编辑 PPTX，保留原有母�
 ```text
 $pptx-refactor 使用 maximum-editability 模式处理这份 PPTX，优先把表格、简单图表、流程图和文本恢复为原生对象。
 ```
+
+### 重构后的配色调整
+
+支持在重构结果或用户自行修改的最新版本上继续统一配色。例如：
+
+```text
+$pptx-refactor 基于我这份最新版本统一配色。文字高亮改为 #FCB824，普通图标与蓝色主题协调，保留内容和版式。
+```
+
+此时使用独立的配色流程，不重新构建幻灯片。辅助工具可先预览精确的颜色替换，再生成新文件及哈希记录；使用说明与边界见 [配色调整](references/palette-followup.md)。
 
 ### 默认交付内容
 
@@ -233,6 +244,10 @@ You can also choose a trade-off mode:
 $pptx-refactor Process this deck in maximum-editability mode. Prioritize native text, tables, simple charts, process diagrams, and reusable shapes.
 ```
 
+### Palette follow-ups
+
+After reconstruction, continue from the user's latest revision to harmonize text emphasis, module colors and generic icons while preserving content and layout. Explicit `$pptx-refactor` palette-only requests use the same bounded path without rebuilding slides. The helper supports dry-run reports and hash-bound outputs; see [palette follow-ups](references/palette-followup.md) for scope and limitations.
+
 ### Default deliverables
 
 - A new `<source>_editable.pptx`; the source file is never overwritten
@@ -277,5 +292,7 @@ Run the repository checks locally with:
 node scripts/validate_skill_bundle.mjs
 node --test tests/*.test.mjs
 ```
+
+Palette tests use Python 3 from `PYTHON`, or `python` on Windows / `python3` elsewhere. In Codex, set `PYTHON` to the bundled runtime executable. No Python packages are required.
 
 Contributions are welcome under the [contribution guide](CONTRIBUTING.md). Security-sensitive reports should follow the [security policy](SECURITY.md). Released code is available under the [MIT License](LICENSE).
