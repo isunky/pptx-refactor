@@ -1,6 +1,6 @@
 ---
 name: pptx-refactor
-description: Convert image-heavy, flattened, screenshot-based, scanned, or mixed-editability PowerPoint (.pptx) decks into visually faithful, editable, visually consistent PPTX files. Use when a user asks to make slide text or content editable, rebuild picture-based slides, OCR slide content, normalize titles/fonts/bullets, replace screenshots with native PowerPoint text, shapes, tables, or charts, regenerate generic raster icons, or improve editability while preserving the source master and layout. Also use for Chinese requests such as 图片型PPT转可编辑、截图PPT重绘、扫描型PPT、扁平化PPT、内容区域文字可编辑、统一标题字体项目符号、图标重绘、原生元素与位图混合. Do not use for ordinary edits to already-editable decks or for net-new presentations.
+description: Rebuild image-heavy, screenshot-based or mixed-editability PPTX slides into faithful editable presentations. Use for 图片型PPT转可编辑、截图PPT重绘 and related reconstruction requests, including subsequent visual consistency and palette refinements. Also use when explicitly invoked for a palette-only edit. Do not use for unrelated routine edits or net-new presentations.
 ---
 
 # PPTX Refactor（PPT重构）
@@ -10,11 +10,15 @@ Rebuild picture-heavy `.pptx` decks into faithful, maintainable presentations wh
 ## Use the required skills and runtime
 
 1. Read and follow `$presentations` before inspecting, editing, or exporting a deck. For an existing PPTX, use its template-following workflow and preserve the master → layout → slide hierarchy.
-2. Use the bundled Artifact Tool for presentation import, inspection, editing, rendering, and export. Do not use `python-pptx`.
+2. Use the bundled Artifact Tool for presentation reconstruction, inspection, editing, rendering, and export. The bounded palette-follow-up helper may patch exact package elements to preserve unrelated source objects. Do not use `python-pptx`.
 3. For a visible generic raster icon, first attempt lossless source extraction and cleanup. Read and call `$imagegen` only when it cannot be extracted cleanly; generate one isolated asset per distinct semantic icon. Do not use it for native editable icons or authenticity-sensitive assets.
 4. Load bundled workspace dependencies and use their exact absolute Node, Python, module, and binary paths. Do not install global packages.
 
 In command examples, replace `<RUNTIME_NODE_ABSOLUTE_PATH>` with the exact bundled `node.exe` or Node binary returned by the loader; quote it and use the shell's executable invocation syntax when the path contains spaces.
+
+## Route the request
+
+For reconstruction, continue with the contract and conversion workflow below. For a palette-only follow-up on the user's latest revision, read [palette-followup.md](references/palette-followup.md) and use that bounded path; do not rebuild already-editable content or require a reconstruction plan. The source deck's current title treatment and user-specified colors take priority over styles from earlier versions.
 
 ## Define the editability contract
 
@@ -230,6 +234,7 @@ Summarize the four editability levels and any remaining caveats. Confirm that th
 
 ## Use the bundled scripts
 
+- `scripts/apply_palette.py` — apply exact slide RGB and selected generic-icon effects without changing unrelated package content; see [palette-followup.md](references/palette-followup.md).
 - `scripts/analyze_hybrid_deck.mjs` — analyze, render, inspect, inventory, and classify a source deck.
 - `scripts/validate_conversion_plan.mjs` — validate exact object coverage and emit a safe frame map.
 - `scripts/rebuild_helpers.mjs` — provide style-injected native reconstruction helpers.
